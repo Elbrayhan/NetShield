@@ -1,0 +1,6 @@
+{
+  "name": "NetShield Admin",
+  "description": "Sistema corporativo de monitoreo de tráfico, alertas de intrusión, bloqueo automático de IP e informes de auditoría con análisis de seguridad asistido por IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
