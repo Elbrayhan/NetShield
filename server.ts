@@ -743,9 +743,14 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[NetShield Enterprise] Running smoothly on port ${PORT}`);
-  });
+  // Only listen on a port if not in a Vercel Serverless environment
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`[NetShield Enterprise] Running smoothly on port ${PORT}`);
+    });
+  }
 }
 
 startServer();
+
+export default app;
