@@ -78,3 +78,30 @@ export interface SecurityIncident {
   timestamp: string;
   description: string;
 }
+
+export interface EmailAlert {
+  id: string;
+  ip: string;
+  timestamp: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  status: 'sent' | 'delivered' | 'failed';
+}
+
+export interface UserSession {
+  id: string;
+  name: string;
+  email: string;
+  assignedIp: string;
+}
+
+export interface FinalTestState {
+  status: 'not_started' | 'running' | 'completed' | 'failed';
+  progress: number;
+  logs: string[];
+  score: number;
+  certified: boolean;
+  completedAt: string | null;
+}
+

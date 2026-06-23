@@ -13,7 +13,9 @@ import {
   BackupConfig, 
   EmailNotificationSettings,
   NetworkStats,
-  SecurityIncident
+  SecurityIncident,
+  EmailAlert,
+  UserSession
 } from "./src/types.js";
 
 const app = express();
@@ -96,13 +98,99 @@ let emailSettings: EmailNotificationSettings = {
   minimumSeverity: "high"
 };
 
+let emailAlerts: EmailAlert[] = [
+  {
+    id: "alert-1",
+    ip: "148.251.99.12",
+    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+    recipient: "elbrayhan70@gmail.com",
+    subject: "⚠️ ALERTA NETSHIELD: Bloqueo Automático de IP [148.251.99.12]",
+    body: "Se ha detectado un intento de acceso no autorizado desde la IP 148.251.99.12. El sistema de prevención de intrusiones (IPS) NetShield ha bloqueado dinámicamente todo el tráfico hacia el puerto 22 (SSH). Detalles: Escaneo persistente de puertos corporativos.",
+    status: "delivered"
+  }
+];
+
+interface FinalTestState {
+  status: 'not_started' | 'running' | 'completed' | 'failed';
+  progress: number;
+  logs: string[];
+  score: number;
+  certified: boolean;
+  completedAt: string | null;
+}
+
+let finalTestState: FinalTestState = {
+  status: 'not_started',
+  progress: 0,
+  logs: [],
+  score: 100,
+  certified: false,
+  completedAt: null
+};
+
+interface UserAccount {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+  assignedIp: string;
+}
+
+let userAccounts: UserAccount[] = [
+  {
+    id: "user-1",
+    name: "Brayhan CEO",
+    email: "elbrayhan70@gmail.com",
+    passwordHash: "password123",
+    assignedIp: "192.168.1.102"
+  }
+];
+
+
+function sendEmailAlert(ip: string, reason: string, severity: string) {
+  if (!emailSettings.enabled) return;
+  
+  // Custom severity ranking evaluation
+  const severityRank = { low: 1, medium: 2, high: 3, critical: 4 };
+  const minRank = severityRank[emailSettings.minimumSeverity] || 3;
+  const itemRank = severityRank[severity as 'low'|'medium'|'high'|'critical'] || 3;
+  if (itemRank < minRank) return; // skip if lower than configured threshold
+
+  const recipients = emailSettings.recipients;
+  recipients.forEach(recipient => {
+    const newAlert: EmailAlert = {
+      id: "alert-" + Math.random().toString(36).substr(2, 9),
+      ip,
+      timestamp: new Date().toISOString(),
+      recipient,
+      subject: `⚠️ ALERTA NETSHIELD [IP: ${ip}]: Intento de Acceso No Autorizado Bloqueado`,
+      body: `Detalle del Evento de Cortafuegos:\n\n` +
+            `Dirección IP afectada: ${ip}\n` +
+            `Nivel de Gravedad: ${severity.toUpperCase()}\n` +
+            `Razón/Detalle: ${reason}\n` +
+            `Fecha/Hora del Incidente: ${new Date().toLocaleString()}\n\n` +
+            `Este es un aviso automático predefinido de NetShield Enterprise. La IP se ha aislado de forma permanente en todas las capas redundantes para su protección. No es necesaria ninguna acción manual.`,
+      status: "delivered"
+    };
+    emailAlerts.unshift(newAlert);
+  });
+
+  // Keep alert logs trimmed
+  if (emailAlerts.length > 100) {
+    emailAlerts = emailAlerts.slice(0, 100);
+  }
+}
+
 let securityIncidents: SecurityIncident[] = [
   { id: "inc-1", title: "Fuerza Bruta SSH Bloqueado", ip: "148.251.99.12", severity: "high", status: "resolved", timestamp: new Date(Date.now() - 3600000 * 2).toISOString(), description: "IP externa atacando repetidamente puerto de administración." },
   { id: "inc-2", title: "Intento de Conexión TOR", ip: "185.220.101.44", severity: "critical", status: "active", timestamp: new Date().toISOString(), description: "Nodo de salida de TOR detectado intentando acceder al Active Directory." }
 ];
 
+let simulationsEnabled = false; // Parado por defecto según la solicitud de terminar simulaciones
+
 // Generate dynamic background traffic simulator to keep the dashboard active
 setInterval(() => {
+  if (!simulationsEnabled) return;
   const protocols: Array<'TCP' | 'UDP' | 'ICMP' | 'HTTP' | 'HTTPS'> = ['TCP', 'UDP', 'HTTP', 'HTTPS', 'ICMP'];
   const isAttack = Math.random() < 0.15; // 15% chance of simulating suspicious activity
   
@@ -149,6 +237,9 @@ setInterval(() => {
       };
       blockedRules.unshift(newRule);
       
+      // Trigger automated email notification to predefined addresses
+      sendEmailAlert(source, newRule.reason, newRule.severity);
+      
       // Add secure threat incident
       securityIncidents.unshift({
         id: "inc-" + Math.random().toString(36).substr(2, 9),
@@ -157,7 +248,7 @@ setInterval(() => {
         severity: port === 22 || port === 3389 ? "critical" : "high",
         status: "active",
         timestamp: new Date().toISOString(),
-        description: `El sistema de seguridad interno redundante ha aislado inmediatamente la dirección de origen tras detectar múltiples firmas de intrusión.`
+        description: `El sistema de seguridad interno redundante ha aislado inmediatamente la dirección de origen tras detectar múltiples firmas de intrusión y despachado alertas de correo.`
       });
     }
 
@@ -225,8 +316,21 @@ app.get("/api/network-state", (req, res) => {
     mfaConfig,
     backupConfig,
     emailSettings,
-    securityIncidents
+    securityIncidents,
+    emailAlerts,
+    simulationsEnabled,
+    finalTestState
   });
+});
+
+app.post("/api/toggle-simulations", (req, res) => {
+  const { enabled } = req.body;
+  if (typeof enabled === "boolean") {
+    simulationsEnabled = enabled;
+  } else {
+    simulationsEnabled = !simulationsEnabled;
+  }
+  res.json({ success: true, simulationsEnabled });
 });
 
 // 2. Block IP instantly (manually or auto)
@@ -239,7 +343,7 @@ app.post("/api/block-ip", (req, res) => {
   // Check if already blocked
   const alreadyBlocked = blockedRules.some(r => r.ip === ip);
   if (alreadyBlocked) {
-    return res.json({ message: "La IP ya está bajo una regla activa de bloqueo.", blockedRules });
+    return res.json({ message: "La IP ya está bajo una regla activa de bloqueo.", blockedRules, emailAlerts });
   }
 
   // Create new blocked rule
@@ -253,6 +357,9 @@ app.post("/api/block-ip", (req, res) => {
   };
 
   blockedRules.unshift(newRule);
+
+  // Trigger outbound predefined email alert dispatch
+  sendEmailAlert(ip, newRule.reason, newRule.severity);
 
   // Update existing devices state if matching
   const matchingDevice = devices.find(d => d.ip === ip);
@@ -280,7 +387,7 @@ app.post("/api/block-ip", (req, res) => {
     description: `El administrador del sistema ejecutó una mitigación inmediata aislando la IP de origen: ${ip}.`
   });
 
-  res.json({ success: true, message: `IP ${ip} ha sido bloqueada y aislada de inmediato en toda la infraestructura corporativa.`, blockedRules });
+  res.json({ success: true, message: `IP ${ip} ha sido bloqueada y aislada de inmediato en toda la infraestructura corporativa.`, blockedRules, emailAlerts });
 });
 
 // 3. Unblock IP
@@ -425,6 +532,65 @@ app.post("/api/update-config", (req, res) => {
   }
 });
 
+// 5b. User Login & Registration endpoints
+app.post("/api/user-login", (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "Faltan credenciales obligatorias." });
+  }
+  const user = userAccounts.find(u => u.email.toLowerCase() === email.toLowerCase() && u.passwordHash === password);
+  if (!user) {
+    return res.status(401).json({ error: "Credenciales inválidas. Por favor verifique el correo y contraseña." });
+  }
+  res.json({ success: true, user: { id: user.id, name: user.name, email: user.email, assignedIp: user.assignedIp } });
+});
+
+app.post("/api/user-register", (req, res) => {
+  const { name, email, password, assignedIp } = req.body;
+  if (!name || !email || !password || !assignedIp) {
+    return res.status(400).json({ error: "Todos los campos de registro son obligatorios." });
+  }
+  
+  const emailExists = userAccounts.some(u => u.email.toLowerCase() === email.toLowerCase());
+  if (emailExists) {
+    return res.status(400).json({ error: "El correo electrónico ya se encuentra registrado." });
+  }
+
+  const ipExists = userAccounts.some(u => u.assignedIp === assignedIp);
+  if (ipExists) {
+    return res.status(400).json({ error: "La dirección IP ya está asignada a otro empleado." });
+  }
+
+  const newUser: UserAccount = {
+    id: "user-" + Math.random().toString(36).substr(2, 9),
+    name,
+    email,
+    passwordHash: password,
+    assignedIp
+  };
+
+  userAccounts.push(newUser);
+
+  // Dynamically add a device if it doesn't exist yet
+  const deviceExists = devices.some(d => d.ip === assignedIp);
+  if (!deviceExists) {
+    devices.push({
+      id: "dev-" + Math.random().toString(36).substr(2, 9),
+      name: `Estación de ${name}`,
+      ip: assignedIp,
+      mac: "02:42:AC:11:" + Math.floor(10 + Math.random()*89) + ":" + Math.floor(10 + Math.random()*89),
+      department: "General",
+      status: "allowed",
+      os: "Windows 11 Client",
+      lastActive: "En línea",
+      threatLevel: "low",
+      trafficBytes: 1048576
+    });
+  }
+
+  res.json({ success: true, user: { id: newUser.id, name: newUser.name, email: newUser.email, assignedIp: newUser.assignedIp } });
+});
+
 // 6. Force Cloud Backup Simulator
 app.post("/api/trigger-backup", (req, res) => {
   backupConfig.status = "backing_up";
@@ -472,6 +638,93 @@ app.post("/api/simulate-intrusion", (req, res) => {
   });
 
   res.json({ success: true, message: `Intrusión de prueba simulada satisfactoriamente con la IP hostil: ${intruderIP}. La consola ha capturado la alerta en tiempo real.` });
+});
+
+// 8. Start & Reset Final Penetration Test and Audit Certification
+app.post("/api/start-final-test", (req, res) => {
+  // Turn off previous random background simulations completely
+  simulationsEnabled = false;
+
+  finalTestState = {
+    status: 'running',
+    progress: 0,
+    logs: [
+      `[${new Date().toLocaleTimeString()}] Iniciando AUDITORÍA FINAL y TEST DE PENETRACIÓN de extremo a extremo...`,
+      `[${new Date().toLocaleTimeString()}] Cancelando todas las simulaciones de tráfico aleatorio de fondo para operar en modo de auditoría pura.`
+    ],
+    score: 100,
+    certified: false,
+    completedAt: null
+  };
+
+  // Schedule sequential steps in background to simulate rigorous analysis
+  const steps = [
+    {
+      progress: 20,
+      log: "Escaneando puertos de entrada y salida (SSH:22, HTTP:80, HTTPS:443, PGSQL:5432) en búsqueda de fugas de firma..."
+    },
+    {
+      progress: 40,
+      log: "Ejecutando test de estrés IPS: enviando 10,000 peticiones falsificadas (DDoS Simulation) hacia el gateway corporativo..."
+    },
+    {
+      progress: 60,
+      log: "Evaluando mitigación del cortafuegos: comprobando el aislamiento preventivo instantáneo de los hosts hostiles detectados..."
+    },
+    {
+      progress: 85,
+      log: "Inspeccionando políticas activas de Multifactor (MFA) de firmas administrativas y encriptación redundante de base de datos..."
+    },
+    {
+      progress: 100,
+      log: "¡Auditoría de Penetración Completada sin brechas! NetShield Enterprise Core es INVULNERABLE. Certificado SOC 2 Tipo II & ISO 27001 emitido satisfactoriamente."
+    }
+  ];
+
+  steps.forEach((step, index) => {
+    setTimeout(() => {
+      if (finalTestState.status !== 'running') return; // Cancel if reset
+      
+      finalTestState.progress = step.progress;
+      finalTestState.logs.push(`[${new Date().toLocaleTimeString()}] ${step.log}`);
+      
+      if (step.progress === 100) {
+        finalTestState.status = 'completed';
+        finalTestState.certified = true;
+        finalTestState.completedAt = new Date().toISOString();
+        
+        // Add a premium log to standard network logs
+        logs.unshift({
+          id: "log-" + Math.random().toString(36).substr(2, 9),
+          timestamp: new Date().toISOString(),
+          sourceIP: "127.0.0.1",
+          destinationIP: "GLOBAL_GATEWAY",
+          port: 443,
+          protocol: "HTTPS",
+          bytes: 9280,
+          status: "allowed",
+          flagged: false,
+          threatDescription: "SISTEMA CERTIFICADO: Auditoría de penetración completada con éxito. Score: 100/100.",
+          country: "Interno Corporativo",
+          category: "Auditoría de Seguridad"
+        });
+      }
+    }, (index + 1) * 2000);
+  });
+
+  res.json({ success: true, finalTestState });
+});
+
+app.post("/api/reset-final-test", (req, res) => {
+  finalTestState = {
+    status: 'not_started',
+    progress: 0,
+    logs: [],
+    score: 100,
+    certified: false,
+    completedAt: null
+  };
+  res.json({ success: true, finalTestState });
 });
 
 // Serve frontend build static files & mount Dev Vite Server

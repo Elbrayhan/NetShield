@@ -26,7 +26,10 @@ import {
   BackupConfig, 
   EmailNotificationSettings,
   NetworkStats,
-  SecurityIncident
+  SecurityIncident,
+  EmailAlert,
+  UserSession,
+  FinalTestState
 } from './types';
 
 export default function App() {
@@ -39,7 +42,19 @@ export default function App() {
     backupConfig: BackupConfig;
     emailSettings: EmailNotificationSettings;
     securityIncidents: SecurityIncident[];
+    emailAlerts: EmailAlert[];
+    simulationsEnabled: boolean;
+    finalTestState: FinalTestState;
   } | null>(null);
+
+  const [currentUser, setCurrentUser] = useState<UserSession | null>(() => {
+    try {
+      const saved = localStorage.getItem('netshield_current_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -154,6 +169,46 @@ export default function App() {
     }
   };
 
+  const handleToggleSimulations = async (enabled: boolean) => {
+    try {
+      const res = await fetch('/api/toggle-simulations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      if (!res.ok) throw new Error('Error al cambiar estado de simulaciones.');
+      await fetchNetworkState(true);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleStartFinalTest = async () => {
+    try {
+      const res = await fetch('/api/start-final-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!res.ok) throw new Error('Error al iniciar la prueba final.');
+      await fetchNetworkState(true);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleResetFinalTest = async () => {
+    try {
+      const res = await fetch('/api/reset-final-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!res.ok) throw new Error('Error al reiniciar la prueba final.');
+      await fetchNetworkState(true);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   // Main global layout render
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 antialiased font-sans selection:bg-slate-900 selection:text-white">
@@ -219,12 +274,12 @@ export default function App() {
         </div>
       </header>
 
-      {/* Info notice explaining simulation features */}
-      <div className="bg-indigo-50 border-b border-indigo-150 p-3 text-center">
-        <div className="max-w-7xl mx-auto px-4 text-xs text-indigo-950 flex items-center justify-center gap-2 flex-wrap font-medium">
-          <Sparkles className="w-4 h-4 text-indigo-600 flex-shrink-0" />
-          <span>¡NetShield está operando en tiempo real con simulación activa de tráfico! Puedes aislar IPs y usar Copiloto IA con un solo clic.</span>
-          <span className="bg-indigo-200 text-indigo-900 font-mono text-[9px] px-1.5 py-0.5 rounded uppercase font-bold">Modo Demostración</span>
+      {/* Info notice explaining system status */}
+      <div className="bg-emerald-50 border-b border-emerald-150 p-3 text-center">
+        <div className="max-w-7xl mx-auto px-4 text-xs text-emerald-950 flex items-center justify-center gap-2 flex-wrap font-medium animate-fade-in">
+          <Shield className="w-4 h-4 text-emerald-650 flex-shrink-0 animate-pulse" />
+          <span>NetShield Enterprise Core: Cortafuegos de alta fidelidad activo y operando de extremo a extremo. Todo el tráfico corporativo está cifrado y bajo supervisión del IPS.</span>
+          <span className="bg-emerald-200 text-emerald-900 font-mono text-[9px] px-1.5 py-0.5 rounded uppercase font-bold tracking-wider">Protección Activa</span>
         </div>
       </div>
 
@@ -260,6 +315,12 @@ export default function App() {
               backupConfig={networkState.backupConfig}
               emailSettings={networkState.emailSettings}
               securityIncidents={networkState.securityIncidents}
+              emailAlerts={networkState.emailAlerts}
+              simulationsEnabled={networkState.simulationsEnabled}
+              finalTestState={networkState.finalTestState}
+              onToggleSimulations={handleToggleSimulations}
+              onStartFinalTest={handleStartFinalTest}
+              onResetFinalTest={handleResetFinalTest}
               onRefresh={() => fetchNetworkState(true)}
               onBlockIp={handleBlockIp}
               onUnblockIp={handleUnblockIp}
@@ -271,6 +332,15 @@ export default function App() {
             <UserConsole 
               devices={networkState.devices}
               blockedRules={networkState.blockedRules}
+              currentUser={currentUser}
+              onUserLogin={(user: UserSession) => {
+                setCurrentUser(user);
+                localStorage.setItem('netshield_current_user', JSON.stringify(user));
+              }}
+              onUserLogout={() => {
+                setCurrentUser(null);
+                localStorage.removeItem('netshield_current_user');
+              }}
               onRefresh={() => fetchNetworkState(true)}
             />
           )

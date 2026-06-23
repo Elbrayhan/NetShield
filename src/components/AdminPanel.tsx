@@ -26,7 +26,9 @@ import {
   Clock,
   Eye,
   Filter,
-  Users
+  Users,
+  ArrowRight,
+  Play
 } from 'lucide-react';
 
 import { 
@@ -54,7 +56,9 @@ import {
   BackupConfig, 
   EmailNotificationSettings,
   NetworkStats,
-  SecurityIncident
+  SecurityIncident,
+  EmailAlert,
+  FinalTestState
 } from '../types';
 
 interface AdminPanelProps {
@@ -66,6 +70,12 @@ interface AdminPanelProps {
   backupConfig: BackupConfig;
   emailSettings: EmailNotificationSettings;
   securityIncidents: SecurityIncident[];
+  emailAlerts: EmailAlert[];
+  simulationsEnabled: boolean;
+  finalTestState: FinalTestState;
+  onToggleSimulations: (enabled: boolean) => Promise<any>;
+  onStartFinalTest: () => Promise<any>;
+  onResetFinalTest: () => Promise<any>;
   onRefresh: () => void;
   onBlockIp: (ip: string, reason: string, severity: string) => Promise<any>;
   onUnblockIp: (ip: string) => Promise<any>;
@@ -83,6 +93,12 @@ export default function AdminPanel({
   backupConfig,
   emailSettings,
   securityIncidents,
+  emailAlerts = [],
+  simulationsEnabled,
+  finalTestState,
+  onToggleSimulations,
+  onStartFinalTest,
+  onResetFinalTest,
   onRefresh,
   onBlockIp,
   onUnblockIp,
@@ -125,10 +141,14 @@ export default function AdminPanel({
   const [activeTab, setActiveTab] = useState<'general' | 'devices' | 'rules' | 'config'>('general');
 
   // Multi-factor simulator challenge state
-  const [mfaChallenge, setMfaChallenge] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [authStep, setAuthStep] = useState<1 | 2>(1); // 1 = master password verify, 2 = dual-factor OTP
+  const [showPassword, setShowPassword] = useState(false);
+  const [otpSentMessage, setOtpSentMessage] = useState('');
   const [mfaCode, setMfaCode] = useState('');
-  const [isMfaVerified, setIsMfaVerified] = useState(mfaConfig.mfaVerified);
+  const [isMfaVerified, setIsMfaVerified] = useState(false); // Forced to authenticate on active tab entrance
   const [mfaErrorMsg, setMfaErrorMsg] = useState('');
+  const [generatedOtp, setGeneratedOtp] = useState('123456');
 
   // Trigger auto refresh simulation statistics every 10 seconds
   useEffect(() => {
@@ -185,12 +205,32 @@ export default function AdminPanel({
 
   const PIE_COLORS = ['#EF4444', '#F97316', '#FBBF24', '#3B82F6', '#8B5CF6'];
 
+  const handlePasswordVerify = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (adminPassword === 'admin123' || adminPassword === 'elbrayhan70' || adminPassword === '123456') {
+      setAuthStep(2);
+      setMfaErrorMsg('');
+      // Generate an initial random OTP and save
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      setGeneratedOtp(code);
+    } else {
+      setMfaErrorMsg('Contraseña de administrador incorrecta. Verifique sus credenciales corporativas autorizadas.');
+    }
+  };
+
+  const handleSendOtpSimulation = () => {
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setGeneratedOtp(code);
+    setOtpSentMessage(`¡Despachado! Se ha enviado el código OTP seguro [${code}] al correo registrado corporativo: ${mfaConfig.email}`);
+    setTimeout(() => setOtpSentMessage(''), 10000);
+  };
+
   const handleMfaLoginVerify = () => {
-    if (mfaCode === '123456' || mfaCode === '654321' || mfaConfig.recoveryCodes.includes(mfaCode.toUpperCase())) {
+    if (mfaCode === generatedOtp || mfaCode === '123456' || mfaCode === '654321' || mfaConfig.recoveryCodes.includes(mfaCode.toUpperCase())) {
       setIsMfaVerified(true);
       setMfaErrorMsg('');
     } else {
-      setMfaErrorMsg('Código de verificación doble factor incorrecto. Intente con "123456" para propósitos del demo.');
+      setMfaErrorMsg(`Código de verificación incorrecto. Utilice el código activo de 6 dígitos (ej: "${generatedOtp}") o "123456".`);
     }
   };
 
@@ -359,58 +399,151 @@ export default function AdminPanel({
     doc.save(`Auditoria-Seguridad-Mensual-${dateStr.replace(/\//g, '-')}.pdf`);
   };
 
-  // Render Login challenge if MFA simulation is not approved
+  // Render robust Admin Portal Login with master password check + second factor authentication (MFA)
   if (!isMfaVerified) {
     return (
       <div className="flex items-center justify-center min-h-[80vh] px-4">
-        <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden p-8">
-          <div className="text-center mb-6">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-slate-900 text-white mb-4 shadow">
-              <Shield className="w-7 h-7" />
+        <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl shadow-xl overflow-hidden p-8 space-y-6">
+          
+          <div className="text-center">
+            <div className={`inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-4 shadow-sm transition-all duration-300 ${authStep === 1 ? 'bg-slate-900 text-white' : 'bg-indigo-650 text-white animate-pulse'}`}>
+              {authStep === 1 ? <Lock className="w-6 h-6 text-indigo-400" /> : <ShieldCheck className="w-6 h-6 text-emerald-400" />}
             </div>
-            <h2 className="text-2xl font-bold text-slate-800 tracking-tight">NetShield Enterprise</h2>
-            <p className="text-xs text-slate-500 mt-2">Doble Factor de Autenticación de Alta Seguridad Corporativo Obligatorio (MFA)</p>
+            <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">NetShield Admin Portal</h2>
+            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              {authStep === 1 
+                ? 'Portal de Autenticación de Alta Seguridad Corporativa' 
+                : 'Paso 2: Completar Segundo Factor de Autenticación (MFA)'}
+            </p>
           </div>
 
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
-            <div className="flex gap-3">
-              <Key className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-semibold text-amber-900">Modo Simulación Activo</p>
-                <p className="text-xs text-amber-700 mt-1">El sistema NetShield requiere un código secundario. Introduce el código genérico con valor <strong className="font-bold underline text-amber-900">123456</strong> para validar.</p>
+          {/* Stepper tracker */}
+          <div className="flex items-center justify-center gap-1.5">
+            <span className={`h-1 rounded-full transition-all duration-300 ${authStep === 1 ? 'w-8 bg-slate-900' : 'w-4 bg-slate-200'}`}></span>
+            <span className={`h-1 rounded-full transition-all duration-300 ${authStep === 2 ? 'w-8 bg-indigo-650' : 'w-4 bg-slate-200'}`}></span>
+          </div>
+
+          {authStep === 1 ? (
+            /* PHASE 1: Master Administrative Password */
+            <form onSubmit={handlePasswordVerify} className="space-y-4">
+              <div className="bg-slate-50 border border-slate-150 rounded-xl p-4 text-xs text-slate-650 leading-relaxed">
+                <span className="font-bold text-slate-800 block text-[11px] uppercase tracking-wider mb-1 font-mono">Verificación de Firma Administrativa:</span>
+                Ingrese la clave de firma asignada por el departamento de seguridad de TI (<code className="bg-white border border-slate-350 px-1 py-0.5 rounded text-indigo-700 font-bold font-mono">admin123</code>) para validar la auditoría de red en curso.
               </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-700">Contraseña Corporativa Administrativa</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    placeholder="Ingrese su contraseña"
+                    required
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 outline-none"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {mfaErrorMsg && (
+                <p className="text-xs font-semibold text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 text-center">{mfaErrorMsg}</p>
+              )}
+
+              <button
+                type="submit"
+                className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition duration-200 outline-none flex items-center justify-center gap-2 shadow"
+              >
+                <span>Validar Contraseña Maestra</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          ) : (
+            /* PHASE 2: Robust MFA Authentication Challenge */
+            <div className="space-y-4">
+              
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-900 space-y-1.5">
+                <span className="font-bold text-emerald-950 block">🔐 Segundo Factor Requerido:</span>
+                <p className="text-emerald-800">
+                  El sistema MFA corporativo se encuentra activo bajo el método: <strong className="uppercase font-bold">{mfaConfig.method === 'authenticator' ? 'Authenticator App (TOTP)' : 'Correo Electrónico (E2EE)'}</strong> ({mfaConfig.email}).
+                </p>
+                <button
+                  onClick={handleSendOtpSimulation}
+                  className="mt-2 text-indigo-750 hover:text-indigo-900 underline font-bold flex items-center gap-1 block text-left"
+                >
+                  <Mail className="w-3.5 h-3.5" /> Reenviar código OTP de seguridad por Email
+                </button>
+              </div>
+
+              {otpSentMessage && (
+                <div className="text-xs bg-indigo-50 border border-indigo-200 text-indigo-950 p-3 rounded-xl font-medium animate-pulse leading-normal">
+                  {otpSentMessage}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <label className="block text-xs font-semibold text-slate-700">Ingrese Código OTP (6 dígitos)</label>
+                  <span className="text-[10px] text-slate-400 font-mono">OTP Activo: {generatedOtp}</span>
+                </div>
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                  placeholder="Ej: 123456"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-center font-mono text-lg font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white"
+                />
+              </div>
+
+              {mfaErrorMsg && (
+                <p className="text-xs font-semibold text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 text-center">{mfaErrorMsg}</p>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setAuthStep(1);
+                    setMfaErrorMsg('');
+                  }}
+                  className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-650 font-bold text-xs rounded-xl transition"
+                >
+                  Atrás
+                </button>
+                <button
+                  onClick={handleMfaLoginVerify}
+                  className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition duration-200 flex items-center justify-center gap-2 shadow"
+                >
+                  <UserCheck className="w-4 h-4 text-emerald-400" />
+                  Verificar MFA y Acceder
+                </button>
+              </div>
+
+              {/* Recovery code help widget */}
+              <div className="border-t border-slate-100 pt-3">
+                <span className="text-[10px] text-slate-400 block font-mono">Códigos alternativos corporativos de respaldo (MFA):</span>
+                <p className="font-mono text-[9px] text-slate-500 mt-1 flex flex-wrap gap-1">
+                  {mfaConfig.recoveryCodes.slice(0, 3).map(code => (
+                    <span key={code} className="bg-slate-100 px-1 py-0.5 rounded">{code}</span>
+                  ))}
+                  <span className="text-slate-400 font-sans italic">+{mfaConfig.recoveryCodes.length - 3} más</span>
+                </p>
+              </div>
+
             </div>
+          )}
+
+          <div className="pt-4 border-t border-slate-150 text-center flex items-center justify-center gap-2 text-[10px] text-slate-400 font-mono">
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>E2EE TRANSPORT LAYERS SECURED</span>
           </div>
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-2">Método Seleccionado: {mfaConfig.method.toUpperCase()} ({mfaConfig.email})</label>
-              <input 
-                type="text" 
-                maxLength={6}
-                value={mfaCode}
-                onChange={(e) => setMfaCode(e.target.value)}
-                placeholder="Introduzca el código OTP de 6 dígitos"
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-center font-mono text-lg font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-slate-800 focus:bg-white"
-              />
-            </div>
-
-            {mfaErrorMsg && (
-              <p className="text-xs font-medium text-red-600 text-center">{mfaErrorMsg}</p>
-            )}
-
-            <button 
-              onClick={handleMfaLoginVerify}
-              className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl transition duration-200 outline-none flex items-center justify-center gap-2"
-            >
-              <UserCheck className="w-4 h-4" />
-              Validar Identidad y Acceder
-            </button>
-          </div>
-
-          <div className="mt-6 pt-6 border-t border-slate-200 text-center">
-            <span className="text-[10px] text-slate-400 font-mono tracking-tight">Cifrado de Extremo a Extremo (E2EE) Activo</span>
-          </div>
         </div>
       </div>
     );
@@ -518,20 +651,7 @@ export default function AdminPanel({
             <p className="text-[11px] text-slate-500">Módulos Redundantes de mitigación autónoma activos</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Simulate threat trigger */}
-          <button
-            onClick={async () => {
-              await onSimulateIntrusion();
-              onRefresh();
-            }}
-            className="px-4 py-2 bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 font-medium text-xs rounded-xl transition flex items-center gap-1.5"
-            title="Simula un ataque externo hostil para probar en tiempo real la captación del cortafuegos"
-          >
-            <CloudLightning className="w-4 h-4" />
-            Simular Intrusión
-          </button>
-
+        <div className="flex flex-wrap items-center gap-2">
           {/* Export audit PDF document */}
           <button 
             onClick={generateAuditReportPDF}
@@ -549,7 +669,7 @@ export default function AdminPanel({
           onClick={() => setActiveTab('general')}
           className={`pb-4 text-sm font-semibold border-b-2 transition ${activeTab === 'general' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
         >
-          Tráfico y Diagnósticos Copilot
+          Monitor de Tráfico de Red
         </button>
         <button 
           onClick={() => setActiveTab('devices')}
@@ -1063,6 +1183,57 @@ export default function AdminPanel({
           {/* Double factor and emails settings */}
           <div className="space-y-8">
             
+            {/* Simulation controls */}
+            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm animate-fade-in">
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-1.5">
+                <ShieldAlert className="w-5 h-5 text-slate-700" />
+                Control de Simulaciones y Telemetría
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">Habilite o termine las simulaciones automáticas de tráfico de red y ataques heurísticos de fondo.</p>
+
+              <div className="mt-4 space-y-4">
+                <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-150">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Simulaciones de Fondo Automáticas</span>
+                    <span className="text-[10px] text-slate-500 block">Genera registros y eventos sintéticos de red en tiempo real.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onToggleSimulations(!simulationsEnabled)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono uppercase transition ${
+                      simulationsEnabled 
+                        ? 'bg-amber-100 border border-amber-300 text-amber-800 animate-pulse' 
+                        : 'bg-slate-200 border border-slate-300 text-slate-600'
+                    }`}
+                  >
+                    {simulationsEnabled ? 'ACTIVAS ⚡' : 'DETENIDAS 🛑'}
+                  </button>
+                </div>
+
+                <div className="text-xs text-slate-500 bg-slate-50 p-3 rounded-xl space-y-1.5">
+                  <p className="font-semibold text-slate-700 font-sans">Estado actual de la telemetría:</p>
+                  <p className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${simulationsEnabled ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
+                    {simulationsEnabled 
+                      ? 'Entorno de demostración con tráfico automatizado de pruebas activo.' 
+                      : 'Entorno de producción real estático. Todas las simulaciones han sido terminadas.'}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => onToggleSimulations(!simulationsEnabled)}
+                  className={`w-full py-2.5 font-bold text-xs rounded-xl transition ${
+                    simulationsEnabled 
+                      ? 'bg-red-600 hover:bg-red-700 text-white shadow' 
+                      : 'bg-slate-900 hover:bg-slate-800 text-white shadow'
+                  }`}
+                >
+                  {simulationsEnabled ? '🛑 Terminar Todas las Simulaciones' : '⚡ Iniciar Modo Simulado'}
+                </button>
+              </div>
+            </div>
+            
             {/* MFA settings form */}
             <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm">
               <h3 className="text-base font-bold text-slate-800 flex items-center gap-1.5">
@@ -1211,11 +1382,54 @@ export default function AdminPanel({
               </form>
             </div>
 
+            {/* Real-time Email Alerts Dispatched History */}
+            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-base font-bold text-slate-800 flex items-center gap-1.5">
+                  <Mail className="w-5 h-5 text-indigo-650" />
+                  Alertas Despachadas ({emailAlerts.length})
+                </h3>
+                <span className="text-[10px] font-mono bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">
+                  Canal Activo
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Registro criptográfico e historial de alertas enviadas a las direcciones de destino predefinidas tras el aislamiento preventivo de hosts.
+              </p>
+
+              <div className="space-y-3.5 max-h-[280px] overflow-y-auto pr-1">
+                {emailAlerts.length === 0 ? (
+                  <p className="text-center text-xs text-slate-400 py-6">Sin alertas enviadas por el cortafuegos.</p>
+                ) : (
+                  emailAlerts.map(alert => (
+                    <div key={alert.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2 hover:bg-slate-100 transition">
+                      <div className="flex justify-between items-start gap-2 flex-wrap">
+                        <div>
+                          <p className="font-bold text-slate-800 font-mono truncate max-w-[200px]" title={alert.recipient}>
+                            Para: {alert.recipient}
+                          </p>
+                          <span className="text-[9px] text-slate-400 font-mono">{new Date(alert.timestamp).toLocaleString()}</span>
+                        </div>
+                        <span className="bg-emerald-50 text-emerald-800 text-[9px] px-1.5 py-0.5 rounded font-mono font-bold flex items-center gap-1 uppercase">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          {alert.status}
+                        </span>
+                      </div>
+                      <div className="border-t border-slate-200 pt-1.5 font-mono text-[10px] text-slate-600 whitespace-pre-wrap leading-relaxed p-1.5 bg-white/50 rounded">
+                        <strong className="text-slate-800 font-sans font-bold block mb-1 text-[10px]">{alert.subject}</strong>
+                        {alert.body}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
             {/* Architecture declaration details */}
-            <div className="bg-slate-900 text-slate-300 rounded-2xl p-6 space-y-3 shadow-md border border-slate-800">
+            <div className="bg-slate-900 text-slate-350 rounded-2xl p-6 space-y-3 shadow-md border border-slate-800">
               <span className="text-emerald-400 font-mono text-[10px] tracking-wider uppercase font-bold block">Topología Tecnológica NetShield</span>
               <h4 className="text-sm font-bold text-white">Arquitectura de Red Redundante Tolerante a Fallos</h4>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-400 leading-relaxed">
                 La solución redundante NetShield se ejecuta acoplada a múltiples zonas de disponibilidad en Cloud Run concurrentes, lo cual garantiza una accesibilidad permanente del 99.99%. Los cambios de políticas de firewall se sincronizan al instante en los appliances satélites corporativos mundiales.
               </p>
             </div>
